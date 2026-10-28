@@ -1,3 +1,4 @@
+
 <!doctype html>
 <html lang="ja">
 <head>
@@ -5,84 +6,383 @@
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <meta name="theme-color" content="#111827">
 <title>QRライブスキャン</title>
+
 <style>
-*{box-sizing:border-box}body{margin:0;background:#111827;color:#fff;font-family:system-ui,-apple-system,sans-serif;text-align:center;padding:18px}h1{font-size:24px;margin:12px 0}p{font-size:16px;line-height:1.5;color:#d1d5db}#reader{width:min(92vw,520px);margin:18px auto;background:#000;border-radius:16px;overflow:hidden}button{font-size:18px;font-weight:700;padding:14px 20px;border:0;border-radius:12px;background:#2563eb;color:#fff;margin:8px}#status{min-height:48px;padding:8px;color:#fde68a}#cancel{background:#4b5563}
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  padding: 18px;
+  padding-top: max(18px, env(safe-area-inset-top));
+  padding-bottom: max(18px, env(safe-area-inset-bottom));
+  background: #111827;
+  color: #fff;
+  font-family: system-ui, -apple-system, sans-serif;
+  text-align: center;
+}
+
+h1 {
+  font-size: 24px;
+  margin: 12px 0;
+}
+
+p {
+  font-size: 16px;
+  line-height: 1.6;
+  color: #d1d5db;
+}
+
+#reader {
+  width: min(92vw, 520px);
+  margin: 18px auto;
+  background: #000;
+  border-radius: 16px;
+  overflow: hidden;
+}
+
+button {
+  font-size: 18px;
+  font-weight: 700;
+  padding: 14px 20px;
+  border: 0;
+  border-radius: 12px;
+  background: #2563eb;
+  color: #fff;
+  margin: 8px;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+
+button:disabled {
+  opacity: 0.5;
+}
+
+#status {
+  min-height: 48px;
+  padding: 8px;
+  color: #fde68a;
+  overflow-wrap: anywhere;
+}
+
+#cancel {
+  background: #4b5563;
+}
+
+#returnHelp {
+  display: none;
+  margin: 16px auto;
+  padding: 14px;
+  border: 1px solid #4b5563;
+  border-radius: 12px;
+  max-width: 520px;
+  color: #fff;
+  line-height: 1.7;
+}
 </style>
+
 <script src="https://cdnjs.cloudflare.com/ajax/libs/html5-qrcode/2.3.8/html5-qrcode.min.js"></script>
 </head>
+
 <body>
 <h1>📷 QRライブスキャン</h1>
-<p>QRコードを枠内に映してください。読み取ると在庫アプリに戻ります。</p>
-<div id="status">カメラを準備しています…</div>
+
+<p>
+  QRコードを枠内に映してください。<br>
+  読み取ると在庫アプリに戻ります。
+</p>
+
+<div id="status" role="status" aria-live="polite">
+  カメラを準備しています…
+</div>
+
 <div id="reader"></div>
+
 <button id="restart" type="button">カメラを再起動</button>
 <button id="cancel" type="button">戻る</button>
+
+<div id="returnHelp">
+  <strong>在庫アプリに戻るには</strong>
+  <p>
+    Safariで画面を閉じられませんでした。<br>
+    Safariのタブ一覧から、元の在庫アプリのタブを選んでください。
+  </p>
+</div>
+
 <script>
 (() => {
+  'use strict';
+
   const params = new URLSearchParams(location.search);
   const token = params.get('token') || '';
+
   let scanner = null;
   let busy = false;
+  let leaving = false;
+  let startRequested = false;
+
   const status = document.getElementById('status');
   const reader = document.getElementById('reader');
+  const restartButton = document.getElementById('restart');
+  const cancelButton = document.getElementById('cancel');
+  const returnHelp = document.getElementById('returnHelp');
 
-  function sendResult(value) {
-    if (!window.opener || window.opener.closed) {
-      status.textContent = '元の在庫アプリが見つかりません。元の画面からQR読み込みを押してください。';
-      return;
+  // 元の在庫アプリが存在するか確認
+  function getOpener() {
+    try {
+      if (window.opener && !window.opener.closed) {
+        return window.opener;
+      }
+    } catch (e) {
+      console.warn('元の画面を確認できません:', e);
     }
-    window.opener.postMessage({ type: 'INVENTORY_QR_RESULT', token, value: String(value) }, '*');
-    status.textContent = '読み取り成功！在庫アプリに戻ります…';
-    stopScanner().finally(() => setTimeout(() => window.close(), 250));
+
+    return null;
   }
 
+  // カメラを停止する
   async function stopScanner() {
-    if (!scanner) return;
     const current = scanner;
     scanner = null;
-    try { await current.stop(); } catch (e) {}
-    try { await current.clear(); } catch (e) {}
-  }
 
-  async function startScanner() {
-    if (busy) return;
-    busy = true;
-    status.textContent = 'カメラを起動しています…';
-    await stopScanner();
-    reader.innerHTML = '';
+    if (!current) return;
+
     try {
-      if (!window.Html5Qrcode) throw new Error('QR読み取りライブラリを読み込めませんでした。通信を確認してください。');
-      scanner = new Html5Qrcode('reader');
-     
-const config = {
-  fps: 15,
-  qrbox: (w, h) => {
-    const minSide = Math.min(w, h);
-    const size = Math.min(240, Math.floor(minSide * 0.65));
-    return {
-      width: Math.max(1, size),
-      height: Math.max(1, size)
-    };
-  }
-};
-
-      const cameras = await Html5Qrcode.getCameras();
-      if (!cameras || !cameras.length) throw new Error('利用できるカメラが見つかりません。');
-      const back = cameras.find(c => /back|rear|environment|背面|後ろ/i.test(c.label));
-      await scanner.start(back ? back.id : { facingMode: 'environment' }, config, sendResult, () => {});
-      status.textContent = 'QRコードを枠内に映してください。';
+      if (current.isScanning) {
+        await current.stop();
+      }
     } catch (e) {
-      console.error(e);
-      await stopScanner();
-      status.textContent = 'カメラを起動できません: ' + (e && e.message ? e.message : String(e)) + '。Safariで開き、カメラ許可とHTTPS接続を確認してください。';
-    } finally { busy = false; }
+      console.warn('カメラ停止時のエラー:', e);
+    }
+
+    try {
+      await current.clear();
+    } catch (e) {
+      console.warn('画面クリア時のエラー:', e);
+    }
   }
 
-  document.getElementById('restart').addEventListener('click', startScanner);
-  document.getElementById('cancel').addEventListener('click', async () => { await stopScanner(); window.close(); });
-  window.addEventListener('pagehide', () => { if (scanner) { try { scanner.stop(); } catch(e) {} } });
-  if (!token) status.textContent = '起動情報がありません。元の在庫アプリからQR読み込みを押してください。';
-  else startScanner();
+  // 元の在庫アプリにメッセージを送る
+  function sendToApp(type, value) {
+    const opener = getOpener();
+
+    if (!opener) return false;
+
+    try {
+      const message = {
+        type: type,
+        token: token
+      };
+
+      if (type === 'INVENTORY_QR_RESULT') {
+        message.value = String(value);
+      }
+
+      // QR読み取り用GitHub Pagesのオリジン
+      opener.postMessage(
+        message,
+        'https://hs0319yu-cmd.github.io'
+      );
+
+      return true;
+    } catch (e) {
+      console.error('在庫アプリへの送信エラー:', e);
+      return false;
+    }
+  }
+
+  // 画面を閉じる。Safariが拒否した場合は案内を表示
+  function closeScannerWindow() {
+    try {
+      if (window.opener && !window.opener.closed) {
+        try {
+          window.opener.focus();
+        } catch (e) {}
+      }
+
+      // クリックイベント内で、待機処理より先に実行する
+      window.close();
+    } catch (e) {
+      console.warn('画面を閉じられません:', e);
+    }
+
+    // 閉じられなかった場合の案内
+    setTimeout(() => {
+      if (!window.closed) {
+        returnHelp.style.display = 'block';
+        status.textContent =
+          'カメラを停止しました。元の在庫アプリのタブを選んでください。';
+      }
+    }, 700);
+  }
+
+  // 戻るボタン
+  function returnToApp() {
+    if (leaving) return;
+    leaving = true;
+
+    restartButton.disabled = true;
+    cancelButton.disabled = true;
+    status.textContent = 'カメラを停止して戻ります…';
+
+    // 元アプリへキャンセルを通知（受信側が未対応でも問題なし）
+    sendToApp('INVENTORY_QR_CANCEL');
+
+    // 停止処理を開始し、画面を閉じる操作は待たない
+    stopScanner();
+
+    closeScannerWindow();
+  }
+
+  // QR読み取り成功
+  function sendResult(value) {
+    if (leaving) return;
+
+    leaving = true;
+    restartButton.disabled = true;
+    cancelButton.disabled = true;
+
+    status.textContent = '読み取り成功！在庫アプリに戻ります…';
+
+    const sent = sendToApp(
+      'INVENTORY_QR_RESULT',
+      value
+    );
+
+    if (!sent) {
+      leaving = false;
+      restartButton.disabled = false;
+      cancelButton.disabled = false;
+
+      status.textContent =
+        '元の在庫アプリに結果を送信できませんでした。' +
+        '元の画面からQR読み取りをやり直してください。';
+
+      return;
+    }
+
+    // 結果送信後、カメラを止めて画面を閉じる
+    stopScanner();
+    closeScannerWindow();
+  }
+
+  // ライブスキャン開始
+  async function startScanner() {
+    if (busy || leaving) return;
+
+    busy = true;
+    startRequested = true;
+    restartButton.disabled = true;
+    status.textContent = 'カメラを起動しています…';
+
+    try {
+      await stopScanner();
+      reader.innerHTML = '';
+
+      if (!window.isSecureContext) {
+        throw new Error(
+          'HTTPS接続ではありません。HTTPSのURLで開いてください。'
+        );
+      }
+
+      if (!navigator.mediaDevices ||
+          !navigator.mediaDevices.getUserMedia) {
+        throw new Error(
+          'この環境ではカメラを使用できません。Safariで開いてください。'
+        );
+      }
+
+      if (!window.Html5Qrcode) {
+        throw new Error(
+          'QR読み取りライブラリを読み込めませんでした。通信を確認してください。'
+        );
+      }
+
+      scanner = new Html5Qrcode('reader');
+
+      const config = {
+        fps: 15,
+        qrbox: (w, h) => {
+          const minSide = Math.min(w, h);
+          const size = Math.max(
+            1,
+            Math.min(240, Math.floor(minSide * 0.65))
+          );
+
+          return {
+            width: size,
+            height: size
+          };
+        },
+        aspectRatio: 1
+      };
+
+      // iPhoneでは背面カメラを優先して直接指定
+      await scanner.start(
+        { facingMode: 'environment' },
+        config,
+        sendResult,
+        () => {}
+      );
+
+      if (leaving) {
+        await stopScanner();
+        return;
+      }
+
+      status.textContent =
+        'QRコードを枠内に映してください。';
+
+    } catch (e) {
+      console.error('カメラ起動エラー:', e);
+
+      await stopScanner();
+
+      if (!leaving) {
+        const message =
+          e && e.message ? e.message : String(e);
+
+        status.textContent =
+          'カメラを起動できません: ' + message +
+          '。Safariのサイト設定でカメラを許可してください。';
+      }
+
+    } finally {
+      busy = false;
+      restartButton.disabled = leaving;
+    }
+  }
+
+  // ボタン登録
+  restartButton.addEventListener('click', () => {
+    startScanner();
+  });
+
+  cancelButton.addEventListener('click', () => {
+    returnToApp();
+  });
+
+  // タブを閉じたり切り替えたりした場合もカメラ停止
+  window.addEventListener('pagehide', () => {
+    if (scanner) {
+      const current = scanner;
+      scanner = null;
+
+      try {
+        current.stop();
+      } catch (e) {}
+    }
+  });
+
+  // 起動情報の確認
+  if (!token) {
+    status.textContent =
+      '起動情報がありません。元の在庫アプリからQR読み取りを押してください。';
+    restartButton.disabled = true;
+  } else {
+    startScanner();
+  }
 })();
 </script>
 </body>
