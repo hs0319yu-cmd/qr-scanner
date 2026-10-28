@@ -53,7 +53,19 @@
     try {
       if (!window.Html5Qrcode) throw new Error('QR読み取りライブラリを読み込めませんでした。通信を確認してください。');
       scanner = new Html5Qrcode('reader');
-      const config = { fps: 10, qrbox: (w,h) => { const s = Math.floor(Math.min(w,h,320)); return {width:s,height:s}; }, aspectRatio: 1.0 };
+     
+const config = {
+  fps: 15,
+  qrbox: (w, h) => {
+    const minSide = Math.min(w, h);
+    const size = Math.min(240, Math.floor(minSide * 0.65));
+    return {
+      width: Math.max(1, size),
+      height: Math.max(1, size)
+    };
+  }
+};
+
       const cameras = await Html5Qrcode.getCameras();
       if (!cameras || !cameras.length) throw new Error('利用できるカメラが見つかりません。');
       const back = cameras.find(c => /back|rear|environment|背面|後ろ/i.test(c.label));
